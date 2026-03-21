@@ -278,7 +278,7 @@ export default function App() {
     const res  = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+        model: 'claude-sonnet-4-6', max_tokens: 1000,
         messages: [{ role: 'user', content: `I have ${description}. Give me 4 practical at-home remedies RIGHT NOW. Be specific and concise. Format as a numbered list.` }]
       })
     })
