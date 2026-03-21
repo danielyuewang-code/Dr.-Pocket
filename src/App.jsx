@@ -313,15 +313,18 @@ export default function App() {
     if (symptom) parts.push(`symptom: ${symptom}`)
     if (customText) parts.push(`additional details: ${customText}`)
     const prompt = `I have the following issue — ${parts.join(', ')}. Give me the best practical at-home remedies. Be specific and concise. Format as a numbered list.`
-    const res  = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6', max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      })
+    const res = await fetch('/api/remedies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt }),
     })
+    if (!res.ok) {
+      setLoading(false)
+      setRemedies('Something went wrong. Please try again.')
+      return
+    }
     const data = await res.json()
-    const remedyText = data.content[0].text
+    const remedyText = data.text
     setRemedies(remedyText); setLoading(false)
     setHistory(prev => [{
       id: Date.now(), region, symptom, customText,
