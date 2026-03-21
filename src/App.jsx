@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
 
-const SYMPTOMS = ['Soreness', 'Cramp', 'Stiffness', 'Itchiness', 'Swelling', 'Sharp Pain']
+const SYMPTOMS = ['Soreness', 'Cramp', 'Stiffness', 'Itchiness', 'Swelling', 'Sharp Pain', 'Discomfort', 'Nerve Pain', 'Pressure']
 
 // ─── Mesh-based region detection ─────────────────────────────────────────────
 const IGNORED_NAMES = new Set(['', 'Scene', 'Group1'])
@@ -57,7 +57,7 @@ const BASE_COLOR   = new THREE.Color(0.85, 0.82, 0.78)
 const HOVER_COLOR  = new THREE.Color(0.23, 0.51, 0.96)
 const HOVER_EMIT   = new THREE.Color(0.04, 0.10, 0.30)
 
-function BodyModel({ onPartClick, onHover, onHoverEnd, interactive }) {
+function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, highlightName }) {
   const { scene } = useGLTF('/sampleUntitled.glb')
   const pointerDown = useRef(null)
 
@@ -71,6 +71,22 @@ function BodyModel({ onPartClick, onHover, onHoverEnd, interactive }) {
       }
     })
   }, [scene])
+
+  // Highlight by name from outside (e.g. history hover)
+  useEffect(() => {
+    scene.traverse(c => {
+      if (!c.isMesh) return
+      if (highlightName && c.name === highlightName) {
+        c.material.color.copy(HOVER_COLOR)
+        c.material.emissive.copy(HOVER_EMIT)
+        c.material.emissiveIntensity = 1
+      } else {
+        c.material.color.copy(BASE_COLOR)
+        c.material.emissive.set(0, 0, 0)
+        c.material.emissiveIntensity = 0
+      }
+    })
+  }, [highlightName, scene])
 
   // Reset all meshes back to base colour
   const resetAll = () => {
@@ -148,7 +164,7 @@ function AnnotationDot({ point }) {
 }
 
 // ─── Annotation Panel ─────────────────────────────────────────────────────────
-function AnnotationPanel({ region, symptom, setSymptom, customText, setCustomText, onGetRemedies, loading, onClear, remedies }) {
+function AnnotationPanel({ region, regionType, setRegionType, symptom, setSymptom, customText, setCustomText, onGetRemedies, loading, onClear, remedies }) {
   return (
     <div style={{
       position: 'absolute', right: '220px', top: '50%', transform: 'translateY(-50%)',
@@ -170,6 +186,19 @@ function AnnotationPanel({ region, symptom, setSymptom, customText, setCustomTex
         }}>✕</button>
       </div>
       <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', marginBottom: '14px' }} />
+      <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginBottom: '8px' }}>Region</div>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}>
+        {['Muscle Group', 'Bone', 'Tissue', 'General Area'].map(r => (
+          <button key={r} onClick={() => setRegionType(r === regionType ? null : r)} style={{
+            padding: '5px 11px', borderRadius: '999px', fontSize: '12px', fontWeight: '300',
+            fontFamily: "'DM Sans', sans-serif",
+            border: `1px solid ${regionType === r ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.07)'}`,
+            background: regionType === r ? 'rgba(255,255,255,0.1)' : 'transparent',
+            color: regionType === r ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.35)',
+            cursor: 'pointer',
+          }}>{r}</button>
+        ))}
+      </div>
       <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginBottom: '8px' }}>Symptoms</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
         {SYMPTOMS.map(s => (
@@ -204,10 +233,13 @@ function AnnotationPanel({ region, symptom, setSymptom, customText, setCustomTex
         }}>
         {loading ? 'Finding remedies...' : 'Get remedies'}
       </button>
-      {remedies && (
+      {(loading || remedies) && (
         <div style={{ marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginBottom: '10px' }}>Remedies</div>
-          <div style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.65)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{remedies}</div>
+          {loading
+            ? <div style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.35)', lineHeight: 1.7, animation: 'blink 1.6s ease-in-out infinite' }}>Loading...</div>
+            : <div style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.65)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{remedies}</div>
+          }
         </div>
       )}
     </div>
@@ -239,7 +271,10 @@ export default function App() {
   const [customText, setCustomText]   = useState('')
   const [remedies, setRemedies]       = useState(null)
   const [loading, setLoading]         = useState(false)
-  const [zoomed, setZoomed]           = useState(false)
+  const [regionType, setRegionType]         = useState(null)
+  const [zoomed, setZoomed]                 = useState(false)
+  const [hoveredHistoryRegion, setHoveredHistoryRegion] = useState(null)
+  const [expandedHistoryId, setExpandedHistoryId]       = useState(null)
   const [hoverRegion, setHoverRegion] = useState(null)
   const [tooltipPos, setTooltipPos]   = useState({ x: 0, y: 0 })
   const [showLogin, setShowLogin]     = useState(false)
@@ -258,12 +293,12 @@ export default function App() {
 
   const handlePartClick = (point, regionName) => {
     setClickPoint(point); setRegion(regionName); setZoomed(true)
-    setSymptom(null); setCustomText(''); setRemedies(null); setHoverRegion(null)
+    setSymptom(null); setCustomText(''); setRemedies(null); setHoverRegion(null); setRegionType(null)
   }
 
   const handleClear = () => {
     setClickPoint(null); setRegion(null); setZoomed(false)
-    setSymptom(null); setCustomText(''); setRemedies(null)
+    setSymptom(null); setCustomText(''); setRemedies(null); setRegionType(null)
   }
 
   const dismissPopup = () => {
@@ -273,13 +308,16 @@ export default function App() {
 
   const getRemedies = async () => {
     setLoading(true); setRemedies(null)
-    const area        = region ? `my ${region}` : ''
-    const description = customText || (symptom && area ? `${symptom} in ${area}` : symptom || area)
+    const parts = []
+    if (region) parts.push(`affected area: ${region}${regionType ? ` (${regionType})` : ''}`)
+    if (symptom) parts.push(`symptom: ${symptom}`)
+    if (customText) parts.push(`additional details: ${customText}`)
+    const prompt = `I have the following issue — ${parts.join(', ')}. Give me the best practical at-home remedies. Be specific and concise. Format as a numbered list.`
     const res  = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6', max_tokens: 1000,
-        messages: [{ role: 'user', content: `I have ${description}. Give me 4 practical at-home remedies RIGHT NOW. Be specific and concise. Format as a numbered list.` }]
+        messages: [{ role: 'user', content: prompt }]
       })
     })
     const data = await res.json()
@@ -330,6 +368,7 @@ export default function App() {
               onHover={(r, x, y) => { setHoverRegion(r); setTooltipPos({ x, y }) }}
               onHoverEnd={() => setHoverRegion(null)}
               interactive={!showLanding}
+              highlightName={hoveredHistoryRegion}
             />
           </Suspense>
 
@@ -433,6 +472,7 @@ export default function App() {
             {clickPoint && region && (
               <AnnotationPanel
                 region={region}
+                regionType={regionType} setRegionType={setRegionType}
                 symptom={symptom} setSymptom={setSymptom}
                 customText={customText} setCustomText={setCustomText}
                 onGetRemedies={getRemedies} loading={loading}
@@ -593,34 +633,49 @@ export default function App() {
                 <div style={{ textAlign: 'center', marginTop: '60px', color: 'rgba(255,255,255,0.2)', fontSize: '13px', fontWeight: '300' }}>
                   Click a body part and get remedies<br />to start building your history.
                 </div>
-              ) : history.map(entry => (
-                <div key={entry.id} style={{
-                  background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: '14px', padding: '16px', marginBottom: '12px',
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+              ) : history.map(entry => {
+                const isExpanded = expandedHistoryId === entry.id
+                return (
+                <div key={entry.id}
+                  onMouseEnter={() => setHoveredHistoryRegion(entry.region)}
+                  onMouseLeave={() => setHoveredHistoryRegion(null)}
+                  onClick={() => setExpandedHistoryId(isExpanded ? null : entry.id)}
+                  style={{
+                    background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                    borderRadius: '14px', padding: '16px', marginBottom: '12px',
+                    cursor: 'pointer', transition: 'border-color 0.2s',
+                    borderColor: hoveredHistoryRegion === entry.region ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)',
+                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: isExpanded && (entry.symptom || entry.customText || entry.remedies) ? '10px' : 0 }}>
                     <div style={{ fontSize: '16px', fontWeight: '400', color: 'white', letterSpacing: '-0.3px' }}>{entry.region}</div>
-                    <div style={{ fontSize: '10px', fontWeight: '300', color: 'rgba(255,255,255,0.25)', whiteSpace: 'nowrap', marginLeft: '8px', marginTop: '2px' }}>{entry.date}</div>
-                  </div>
-                  {(entry.symptom || entry.customText) && (
-                    <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {entry.symptom && (
-                        <span style={{ padding: '3px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: '300', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.55)' }}>{entry.symptom}</span>
-                      )}
-                      {entry.customText && (
-                        <span style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>"{entry.customText}"</span>
-                      )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ fontSize: '10px', fontWeight: '300', color: 'rgba(255,255,255,0.25)', whiteSpace: 'nowrap', marginTop: '2px' }}>{entry.date}</div>
+                      <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.2)', marginTop: '2px' }}>{isExpanded ? '▲' : '▼'}</div>
                     </div>
-                  )}
-                  {entry.remedies && (
+                  </div>
+                  {isExpanded && (
                     <>
-                      <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', marginBottom: '10px' }} />
-                      <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', marginBottom: '6px' }}>Remedies</div>
-                      <div style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{entry.remedies}</div>
+                      {(entry.symptom || entry.customText) && (
+                        <div style={{ marginBottom: '10px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {entry.symptom && (
+                            <span style={{ padding: '3px 10px', borderRadius: '999px', fontSize: '11px', fontWeight: '300', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.55)' }}>{entry.symptom}</span>
+                          )}
+                          {entry.customText && (
+                            <span style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.4)', fontStyle: 'italic' }}>"{entry.customText}"</span>
+                          )}
+                        </div>
+                      )}
+                      {entry.remedies && (
+                        <>
+                          <div style={{ height: '1px', background: 'rgba(255,255,255,0.05)', marginBottom: '10px' }} />
+                          <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', marginBottom: '6px' }}>Remedies</div>
+                          <div style={{ fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.5)', lineHeight: 1.7, whiteSpace: 'pre-wrap' }}>{entry.remedies}</div>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
-              ))}
+              )})}
             </div>
             {history.length > 0 && (
               <div style={{ padding: '16px', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
