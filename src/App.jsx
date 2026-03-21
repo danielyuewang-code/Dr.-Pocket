@@ -1,13 +1,6 @@
-import { useState, Suspense } from 'react'
-import { Canvas } from '@react-three/fiber'
-import { OrbitControls, useGLTF } from '@react-three/drei'
+import { useState } from 'react'
 
 const SYMPTOMS = ['Soreness', 'Cramp', 'Stiffness', 'Itchiness', 'Swelling', 'Sharp Pain']
-
-function BodyModel() {
-  const { scene } = useGLTF('/human-simple.glb')
-  return <primitive object={scene} scale={0.1} position={[0, -1, 0]} />
-}
 
 function App() {
   const [symptom, setSymptom] = useState(null)
@@ -45,35 +38,17 @@ function App() {
       </div>
 
       <div style={{ display: 'flex', height: 'calc(100vh - 80px)' }}>
-        <div style={{ width: '450px', borderRight: '1px solid #222', position: 'relative' }}>
+        <div style={{ width: '450px', borderRight: '1px solid #222', position: 'relative', background: '#111' }}>
           <p style={{ position: 'absolute', top: '1rem', left: '50%', transform: 'translateX(-50%)', color: '#aaa', fontSize: '0.85rem', zIndex: 10, whiteSpace: 'nowrap' }}>
             🖱️ Drag to rotate • Scroll to zoom
           </p>
-          <Suspense fallback={
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ fontSize: '3rem' }}>🩺</div>
-              <p style={{ color: '#666' }}>Loading Dr. Pocket...</p>
-            </div>
-          }>
-
-            <Canvas
-              camera={{ position: [0, 1.5, 3], fov: 50 }}
-              style={{ height: '100%' }}
-              dpr={1}
-              frameloop="demand"
-              gl={{
-                antialias: false,
-                powerPreference: 'low-power',
-                failIfMajorPerformanceCaveat: false
-              }}
-            >
-              <ambientLight intensity={0.8} />
-              <directionalLight position={[2, 4, 2]} intensity={1} />
-              <directionalLight position={[-2, -2, -2]} intensity={0.3} />
-              <BodyModel />
-              <OrbitControls enablePan={false} />
-            </Canvas>
-          </Suspense>
+          <model-viewer
+            src="/human-simple.glb"
+            camera-controls
+            auto-rotate
+            shadow-intensity="1"
+            style={{ width: '100%', height: '100%', background: 'transparent' }}
+          />
         </div>
 
         <div style={{ flex: 1, padding: '2rem', overflowY: 'auto' }}>
