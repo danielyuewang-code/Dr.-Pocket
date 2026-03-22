@@ -1,3 +1,9 @@
+# Dr. Pocket
+
+Copyright © 2026 Jason Chan, Soren Caron, Daniel Wang, Samuel Zhu. All rights reserved.
+
+---
+
 # React + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

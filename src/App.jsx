@@ -543,6 +543,14 @@ export default function App() {
                   Hover · Click · Drag · Scroll
                 </div>
               )}
+            <div style={{
+              position: 'absolute', bottom: '12px', right: '20px',
+              fontSize: '10px', fontWeight: '300', color: 'rgba(255,255,255,0.15)',
+              zIndex: 10, pointerEvents: 'none', whiteSpace: 'nowrap',
+              fontFamily: "'DM Sans', sans-serif",
+            }}>
+              © 2026 Jason Chan, Soren Caron, Daniel Wang, Samuel Zhu. All rights reserved.
+            </div>
             </>
           )}
 
