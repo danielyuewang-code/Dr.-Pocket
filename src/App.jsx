@@ -2,54 +2,103 @@ import { useState, useRef, useEffect, Suspense } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls, useGLTF } from '@react-three/drei'
 import * as THREE from 'three'
+import {
+  auth, loginUser, registerUser, logoutUser,
+  onAuthChange, saveProfile, saveHistory, loadUserData,
+} from './firebase'
 
 // Doc 3 added: Discomfort, Nerve Pain, Pressure
 const SYMPTOMS = ['Soreness', 'Cramp', 'Stiffness', 'Itchiness', 'Swelling', 'Sharp Pain', 'Discomfort', 'Nerve Pain', 'Pressure']
+
+const JOKES = [
+  "Why did the skeleton go to the doctor? Because he had a funny bone.",
+  "I told my doctor I broke my arm in two places. He told me to stop going to those places.",
+  "Why do doctors make terrible comedians? Their jokes always need a second opinion.",
+  "My back went out more than I did last weekend.",
+  "I asked my knee why it was hurting. It said 'I'm just going through a rough patch.'",
+  "Why did the muscle go to therapy? It had too many knots to work through.",
+  "My chiropractor told me I was spine-credible. I think he was just cracking jokes.",
+  "I have a joke about my rotator cuff but it's a bit of a stretch.",
+  "Why don't skeletons fight each other? They don't have the guts.",
+  "My doctor said I need to watch my drinking. I'm doing it now — watching myself drink.",
+  "I told my doctor I keep hearing music in my ear. He said I probably have a Disney.",
+  "Why did the athlete bring string to the race? To tie the muscle.",
+  "I pulled a muscle laughing at my own pain. That's called a groan injury.",
+  "My wrist hurts from scrolling. My doctor called it 'chronic meme strain.'",
+  "Why did the knee break up with the ankle? They couldn't see eye to eye — or foot to knee.",
+  "I told my doctor my shoulder hurts when I do this. He said 'then don't do that.' $300 well spent.",
+  "Why was the spine always calm? It had a lot of backbone.",
+  "My neck hurts from looking down at my phone. My phone said 'no regrets.'",
+  "I have a joke about herniated discs but it's too slipped to tell.",
+  "Why did the tendon get promoted? Because it always stayed connected under pressure.",
+]
 
 const labelStyle = { fontSize: '9px', fontWeight: '400', letterSpacing: '1.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', marginBottom: '4px', fontFamily: "'DM Sans', sans-serif" }
 const inputStyle = { width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '7px 10px', color: 'rgba(255,255,255,0.7)', fontSize: '12px', fontWeight: '300', fontFamily: "'DM Sans', sans-serif", outline: 'none', boxSizing: 'border-box' }
 
 // ─── Mesh-based region detection ─────────────────────────────────────────────
-const IGNORED_NAMES = new Set(['', 'Scene', 'Group1'])
-
-// Also ignore Blender auto-named nodes like 'Group1.003', 'Group1.016' etc.
-function isIgnored(name) {
-  if (!name) return true
-  if (IGNORED_NAMES.has(name)) return true
-  if (/^Group1\.\d+$/.test(name)) return true
-  return false
-}
+// New GLB has all nodes properly named — just ignore the base body skin (Main).
+const BASE_IGNORED = new Set(['', 'Scene', 'Group1', 'Main'])
 
 function getMeshRegionName(obj) {
-  if (!isIgnored(obj.name)) return obj.name
-  return null
+  const name = obj.name
+  if (!name || BASE_IGNORED.has(name)) return null
+  return name
 }
 
 // ─── Camera Controller ────────────────────────────────────────────────────────
-function CameraController({ target, zoom, orbitRef, landingMode, stopRef, resetKey }) {
+function CameraController({ target, zoom, approachDir, orbitRef, landingMode, stopRef, resetKey }) {
   const { camera } = useThree()
   const animating = useRef(false)
+  const sphericalReset = useRef(false)
   const targetCamPos = useRef(new THREE.Vector3())
   const targetLook = useRef(new THREE.Vector3())
 
   useEffect(() => {
+    sphericalReset.current = false
     if (landingMode) {
       targetCamPos.current.set(0.45, 0.91, 0.22)
       targetLook.current.set(0, 0.91, 0.22)
     } else if (target && zoom) {
-      targetCamPos.current.copy(target).add(new THREE.Vector3(0, 0, 1.4))
-      targetLook.current.copy(target).add(new THREE.Vector3(0.2, 0, 0))
+      const dir = approachDir ? approachDir.clone() : new THREE.Vector3(0, 0, 1)
+      targetCamPos.current.copy(target).addScaledVector(dir, 1.4)
+      const xOffset = dir.z < 0 ? -0.2 : 0.2
+      targetLook.current.copy(target).add(new THREE.Vector3(xOffset, 0, 0))
     } else {
       targetCamPos.current.set(0, -0.3, 10)
       targetLook.current.set(0, -0.3, 0)
+      // Arc around the model instead of cutting through it
+      if (camera.position.z < 0) sphericalReset.current = true
     }
     animating.current = true
   }, [target, zoom, landingMode, resetKey])
 
   useFrame(() => {
-    if (stopRef && stopRef.current) { animating.current = false; stopRef.current = false }
+    if (stopRef && stopRef.current) { animating.current = false; stopRef.current = false; sphericalReset.current = false }
     if (!animating.current) return
     const speed = landingMode ? 0.03 : (target && zoom) ? 0.08 : 0.035
+
+    if (sphericalReset.current && orbitRef.current) {
+      // Spherical lerp — keeps camera at constant distance, arcs around outside of model
+      const center = targetLook.current
+      const relCur = camera.position.clone().sub(center)
+      const relTgt = targetCamPos.current.clone().sub(center)
+      const curSph = new THREE.Spherical().setFromVector3(relCur)
+      const tgtSph = new THREE.Spherical().setFromVector3(relTgt)
+      curSph.radius = THREE.MathUtils.lerp(curSph.radius, tgtSph.radius, speed)
+      curSph.phi    = THREE.MathUtils.lerp(curSph.phi,    tgtSph.phi,    speed)
+      // Shortest-path theta wrap
+      let dTheta = tgtSph.theta - curSph.theta
+      if (dTheta > Math.PI)  dTheta -= 2 * Math.PI
+      if (dTheta < -Math.PI) dTheta += 2 * Math.PI
+      curSph.theta += dTheta * speed
+      camera.position.copy(new THREE.Vector3().setFromSpherical(curSph).add(center))
+      orbitRef.current.target.lerp(targetLook.current, speed)
+      orbitRef.current.update()
+      if (camera.position.distanceTo(targetCamPos.current) < 0.01) { animating.current = false; sphericalReset.current = false }
+      return
+    }
+
     camera.position.lerp(targetCamPos.current, speed)
     if (orbitRef.current) {
       orbitRef.current.target.lerp(targetLook.current, speed)
@@ -63,11 +112,12 @@ function CameraController({ target, zoom, orbitRef, landingMode, stopRef, resetK
 
 // ─── Body Model ───────────────────────────────────────────────────────────────
 const BASE_COLOR  = new THREE.Color(0.85, 0.82, 0.78)
-const HOVER_COLOR = new THREE.Color(0.80, 0.12, 0.12)  // Doc 4: red highlight
+const HOVER_COLOR = new THREE.Color(0.80, 0.12, 0.12)
 const HOVER_EMIT  = new THREE.Color(0.40, 0.04, 0.04)
 
 function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, selectedRegion, highlightName }) {
   const { scene } = useGLTF('/sampleUntitled.glb')
+  const { camera } = useThree()
   const pointerDown = useRef(null)
   const selectedMesh = useRef(null)
 
@@ -75,13 +125,13 @@ function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, selectedRegi
     scene.traverse(c => {
       if (c.isMesh) {
         c.material = new THREE.MeshStandardMaterial({
-          color: BASE_COLOR.clone(), roughness: 0.75, metalness: 0.0
+          color: BASE_COLOR.clone(), roughness: 0.75, metalness: 0.0,
+          side: THREE.DoubleSide
         })
       }
     })
   }, [scene])
 
-  // Doc 4: clear selection highlight when region deselected
   useEffect(() => {
     if (!selectedRegion) {
       selectedMesh.current = null
@@ -95,12 +145,13 @@ function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, selectedRegi
     }
   }, [selectedRegion, scene])
 
-  // Doc 3: highlight by name from history hover
+  // Highlight from history hover — match by resolved name
   useEffect(() => {
     if (!highlightName) return
     scene.traverse(c => {
       if (!c.isMesh) return
-      if (c.name === highlightName) {
+      const resolved = getMeshRegionName(c)
+      if (resolved === highlightName) {
         c.material.color.copy(HOVER_COLOR)
         c.material.emissive.copy(HOVER_EMIT)
         c.material.emissiveIntensity = 1
@@ -127,7 +178,6 @@ function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, selectedRegi
         c.material.emissiveIntensity = 0
       }
     })
-    // Doc 4: keep selected mesh highlighted after hover moves away
     if (selectedMesh.current) applyHighlight(selectedMesh.current)
   }
 
@@ -157,7 +207,8 @@ function BodyModel({ onPartClick, onHover, onHoverEnd, interactive, selectedRegi
         if (name) {
           selectedMesh.current = e.object
           applyHighlight(e.object)
-          onPartClick(e.point.clone(), name)
+          const dir = camera.position.clone().sub(e.point).normalize()
+          onPartClick(e.point.clone(), name, dir)
         }
       } : undefined}
 
@@ -208,7 +259,6 @@ function AnnotationPanel({ region, regionType, setRegionType, symptom, setSympto
       </div>
       <div style={{ height: '1px', background: 'rgba(255,255,255,0.06)', marginBottom: '14px' }} />
 
-      {/* Doc 3: Region type */}
       <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginBottom: '8px' }}>Region</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '14px' }}>
         {['Muscle Group', 'Bone', 'Tissue', 'General Area'].map(r => (
@@ -258,7 +308,6 @@ function AnnotationPanel({ region, regionType, setRegionType, symptom, setSympto
         {loading ? 'Finding remedies...' : 'Get remedies'}
       </button>
 
-      {/* Doc 3: loading state inside remedies section */}
       {(loading || remedies) && (
         <div style={{ marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '14px' }}>
           <div style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)', marginBottom: '10px' }}>Remedies</div>
@@ -290,6 +339,17 @@ const GLOBAL_STYLE = `
     50% { transform: translateX(-5px); opacity: 0.85; }
   }
   select option { color: #000; background: #fff; }
+  @keyframes excitedBounce {
+    0%, 65%, 100% { transform: translateY(0) rotate(0deg); }
+    68%  { transform: translateY(-7px) rotate(-6deg); }
+    71%  { transform: translateY(2px)  rotate(4deg);  }
+    74%  { transform: translateY(-6px) rotate(-5deg); }
+    77%  { transform: translateY(2px)  rotate(5deg);  }
+    80%  { transform: translateY(-4px) rotate(-3deg); }
+    83%  { transform: translateY(1px)  rotate(2deg);  }
+    86%  { transform: translateY(-2px) rotate(-1deg); }
+    89%  { transform: translateY(0)    rotate(0deg);  }
+  }
 `
 
 // ─── App ──────────────────────────────────────────────────────────────────────
@@ -297,6 +357,7 @@ export default function App() {
   const [showLanding, setShowLanding]   = useState(true)
   const [fading, setFading]             = useState(false)
   const [clickPoint, setClickPoint]     = useState(null)
+  const [clickDir, setClickDir]         = useState(null)
   const [region, setRegion]             = useState(null)
   const [regionType, setRegionType]     = useState(null)
   const [symptom, setSymptom]           = useState(null)
@@ -310,10 +371,15 @@ export default function App() {
   const [showLogin, setShowLogin]       = useState(false)
   const [loginEmail, setLoginEmail]     = useState('')
   const [loginPassword, setLoginPassword] = useState('')
+  const [authMode, setAuthMode]         = useState('login')
+  const [authError, setAuthError]       = useState('')
+  const [authWorking, setAuthWorking]   = useState(false)
+  const [user, setUser]                 = useState(null)
+  const [authLoading, setAuthLoading]   = useState(true)
   const [showHistory, setShowHistory]   = useState(false)
   const [historyHintSeen, setHistoryHintSeen] = useState(false)
   const [history, setHistory]           = useState([])
-  const [expandedHistoryId, setExpandedHistoryId]     = useState(null)
+  const [expandedHistoryId, setExpandedHistoryId]       = useState(null)
   const [hoveredHistoryRegion, setHoveredHistoryRegion] = useState(null)
   const [profileOpen, setProfileOpen]     = useState(false)
   const [profileSaved, setProfileSaved]   = useState(false)
@@ -328,9 +394,33 @@ export default function App() {
     conditions: '', medications: '', allergies: '',
     activityLevel: '', smoking: '', familyHistory: '',
   })
+  const [jokeVisible, setJokeVisible] = useState(false)
+  const [jokeFading, setJokeFading]   = useState(false)
+  const [currentJoke, setCurrentJoke] = useState('')
+  const jokeTimerRef = useRef(null)
   const orbitRef    = useRef()
   const stopAnimRef = useRef(false)
   const [resetKey, setResetKey] = useState(0)
+
+  // ─── Firebase auth listener ────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onAuthChange(async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser)
+        const { profile: savedProfile, history: savedHistory } = await loadUserData(firebaseUser.uid)
+        setProfile(savedProfile)
+        setProfileDraft(savedProfile)
+        setHistory(savedHistory)
+        if (Object.values(savedProfile).some(v => v)) setProfileSaved(true)
+      } else {
+        setUser(null)
+        setHistory([])
+        setProfile({ dob: '', sex: '', height: '', weight: '', conditions: '', medications: '', allergies: '', activityLevel: '', smoking: '', familyHistory: '' })
+      }
+      setAuthLoading(false)
+    })
+    return () => unsub()
+  }, [])
 
   const dismissLanding = () => {
     if (!showLanding || fading) return
@@ -338,8 +428,8 @@ export default function App() {
     setTimeout(() => setShowLanding(false), 800)
   }
 
-  const handlePartClick = (point, regionName) => {
-    setClickPoint(point); setRegion(regionName); setZoomed(true)
+  const handlePartClick = (point, regionName, dir) => {
+    setClickPoint(point); setClickDir(dir || null); setRegion(regionName); setZoomed(true)
     setSymptom(null); setCustomText(''); setRemedies(null)
     setHoverRegion(null); setRegionType(null)
   }
@@ -351,6 +441,28 @@ export default function App() {
     setRegionType(null); setCameraModified(false)
     setResetKey(k => k + 1)
   }
+
+  const fadeJoke = () => {
+    setJokeFading(true)
+    setTimeout(() => { setJokeVisible(false); setJokeFading(false) }, 450)
+  }
+
+  const showNewJoke = (e) => {
+    e.stopPropagation()
+    if (jokeTimerRef.current) clearTimeout(jokeTimerRef.current)
+    const joke = JOKES[Math.floor(Math.random() * JOKES.length)]
+    setCurrentJoke(joke)
+    setJokeFading(false)
+    setJokeVisible(true)
+    jokeTimerRef.current = setTimeout(fadeJoke, 9000)
+  }
+
+  useEffect(() => {
+    if (!jokeVisible) return
+    const handler = () => fadeJoke()
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [jokeVisible])
 
   const dismissPopup = () => {
     setRegion(null)
@@ -380,10 +492,18 @@ export default function App() {
 
     const prompt = `I have the following issue — ${parts.join(', ')}.${ctx ? ` Patient context: ${ctx}.` : ''} Give me the best practical at-home remedies. Be specific and concise. Format as a numbered list.`
 
-    const res = await fetch('/api/remedies', {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt }),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': import.meta.env.VITE_ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
     })
     if (!res.ok) {
       setLoading(false)
@@ -394,11 +514,15 @@ export default function App() {
     const remedyText = data.text
     setRemedies(remedyText); setLoading(false)
 
-    setHistory(prev => [{
-      id: Date.now(), region, regionType, symptom, customText,
-      remedies: remedyText,
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    }, ...prev])
+    setHistory(prev => {
+      const updated = [{
+        id: Date.now(), region, regionType, symptom, customText,
+        remedies: remedyText,
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      }, ...prev]
+      if (user) saveHistory(user.uid, updated)
+      return updated
+    })
   }
 
   return (
@@ -432,7 +556,7 @@ export default function App() {
             <directionalLight position={[-2, -2, -2]} intensity={0.2} />
             <directionalLight position={[0, -4, 2]} intensity={0.3} />
 
-            <CameraController target={clickPoint} zoom={zoomed} orbitRef={orbitRef} landingMode={showLanding} stopRef={stopAnimRef} resetKey={resetKey} />
+            <CameraController target={clickPoint} zoom={zoomed} approachDir={clickDir} orbitRef={orbitRef} landingMode={showLanding} stopRef={stopAnimRef} resetKey={resetKey} />
 
             <Suspense fallback={null}>
               <BodyModel
@@ -570,8 +694,12 @@ export default function App() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
                   <div>
-                    <div style={{ fontSize: '22px', fontWeight: '300', color: 'white', letterSpacing: '-0.5px' }}>Welcome back</div>
-                    <div style={{ fontSize: '13px', fontWeight: '300', color: 'rgba(255,255,255,0.35)', marginTop: '4px' }}>Sign in to your account</div>
+                    <div style={{ fontSize: '22px', fontWeight: '300', color: 'white', letterSpacing: '-0.5px' }}>
+                      {authMode === 'login' ? 'Welcome back' : 'Create account'}
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: '300', color: 'rgba(255,255,255,0.35)', marginTop: '4px' }}>
+                      {authMode === 'login' ? 'Sign in to your account' : 'Join Dr. Pocket'}
+                    </div>
                   </div>
                   <button onClick={() => setShowLogin(false)} style={{
                     background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)',
@@ -591,18 +719,38 @@ export default function App() {
                     style={{ width: '100%', padding: '13px 16px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', color: 'white', fontSize: '14px', fontWeight: '300', fontFamily: "'DM Sans', sans-serif", outline: 'none', boxSizing: 'border-box' }}
                   />
                 </div>
-                <button onClick={() => {}} style={{ width: '100%', padding: '14px', background: 'white', color: '#000', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '700', fontFamily: "'DM Sans', sans-serif", cursor: 'pointer' }}>
-                  Log in
+                <button
+                  onClick={async () => {
+                    setAuthError(''); setAuthWorking(true)
+                    try {
+                      if (authMode === 'login') await loginUser(loginEmail, loginPassword)
+                      else await registerUser(loginEmail, loginPassword)
+                      setShowLogin(false); setLoginEmail(''); setLoginPassword('')
+                    } catch (e) {
+                      setAuthError(e.message.replace('Firebase: ', '').replace(/\s*\(.*\)/, ''))
+                    }
+                    setAuthWorking(false)
+                  }}
+                  style={{ width: '100%', padding: '14px', background: 'white', color: '#000', border: 'none', borderRadius: '12px', fontSize: '14px', fontWeight: '700', fontFamily: "'DM Sans', sans-serif", cursor: 'pointer', opacity: authWorking ? 0.6 : 1 }}
+                >
+                  {authWorking ? 'Please wait...' : authMode === 'login' ? 'Log in' : 'Create account'}
                 </button>
+                {authError && (
+                  <div style={{ marginTop: '12px', fontSize: '12px', color: '#ff6b6b', textAlign: 'center', fontWeight: '300' }}>{authError}</div>
+                )}
                 <div style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px', fontWeight: '300', color: 'rgba(255,255,255,0.25)' }}>
-                  Don't have an account? <span style={{ color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>Sign up</span>
+                  {authMode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+                  <span onClick={() => { setAuthMode(m => m === 'login' ? 'signup' : 'login'); setAuthError('') }}
+                    style={{ color: 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>
+                    {authMode === 'login' ? 'Sign up' : 'Log in'}
+                  </span>
                 </div>
               </div>
             </div>
           )}
         </div>{/* end content area */}
 
-        {/* Navbar — outside content so it doesn't shift with sidebar */}
+        {/* Navbar */}
         {!showLanding && (
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, zIndex: 300,
@@ -615,10 +763,19 @@ export default function App() {
             <span style={{ fontSize: '10px', fontWeight: '400', letterSpacing: '2px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.28)' }}>
               Hover to explore · Click to select
             </span>
+            <div style={{ marginLeft: 'auto', pointerEvents: 'all', display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {user
+                ? <>
+                    <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.3)', fontWeight: '300' }}>{user.email}</span>
+                    <button onClick={logoutUser} style={{ padding: '5px 14px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '999px', color: 'rgba(255,255,255,0.45)', cursor: 'pointer', fontSize: '11px', fontFamily: 'inherit' }}>Log out</button>
+                  </>
+                : <button onClick={() => setShowLogin(true)} style={{ padding: '7px 18px', background: 'white', border: 'none', borderRadius: '999px', color: '#000', cursor: 'pointer', fontSize: '12px', fontWeight: '700', fontFamily: 'inherit' }}>Log in</button>
+              }
+            </div>
           </div>
         )}
 
-        {/* Reset button — bottom center */}
+        {/* Reset button */}
         {!showLanding && (clickPoint || cameraModified) && (
           <div style={{
             position: 'absolute', bottom: '72px', left: '50%',
@@ -634,7 +791,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Edge tab — chevron, anchored to sidebar left edge */}
+        {/* Edge tab */}
         {!showLanding && (
           <div style={{
             position: 'absolute', top: '50%', right: '360px',
@@ -671,6 +828,41 @@ export default function App() {
           </div>
         )}
 
+        {/* Joke button — bottom left */}
+        {!showLanding && (
+          <div style={{ position: 'absolute', bottom: '28px', left: '28px', zIndex: 300 }}>
+            {jokeVisible && (
+              <div style={{
+                position: 'absolute', bottom: '72px', left: 0,
+                width: '260px', background: '#111', border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: '16px', padding: '18px 20px',
+                fontSize: '13px', fontWeight: '300', color: 'rgba(255,255,255,0.75)',
+                lineHeight: '1.7', fontFamily: "'DM Sans', sans-serif",
+                boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
+                opacity: jokeFading ? 0 : 1, transition: 'opacity 0.45s ease',
+                pointerEvents: 'none',
+              }}>
+                {currentJoke}
+                <div style={{ position: 'absolute', bottom: '-13px', left: '15px', width: 0, height: 0, borderLeft: '10px solid transparent', borderRight: '10px solid transparent', borderTop: '13px solid rgba(255,255,255,0.1)' }} />
+                <div style={{ position: 'absolute', bottom: '-11px', left: '16px', width: 0, height: 0, borderLeft: '9px solid transparent', borderRight: '9px solid transparent', borderTop: '11px solid #111' }} />
+              </div>
+            )}
+            <button onClick={showNewJoke} style={{
+              width: '42px', height: '42px', borderRadius: '50%',
+              background: 'white', border: 'none', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+              animation: 'excitedBounce 4s ease-in-out infinite',
+            }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <circle cx="7" cy="8" r="1.2" fill="#111"/>
+                <circle cx="13" cy="8" r="1.2" fill="#111"/>
+                <path d="M6.5 12.5 Q10 15.5 13.5 12.5" stroke="#111" strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+              </svg>
+            </button>
+          </div>
+        )}
+
         {/* Medical history sidebar */}
         {!showLanding && (
           <div style={{
@@ -690,7 +882,7 @@ export default function App() {
               )}
             </div>
 
-            {/* Health Profile collapsible */}
+            {/* Health Profile */}
             {(() => {
               const profileHasData = Object.values(profile).some(v => v)
               const showForm = !profileSaved || profileEditing
@@ -767,7 +959,11 @@ export default function App() {
                           ))}
                           <button onClick={() => {
                             const hasAny = Object.values(profileDraft).some(v => v)
-                            if (hasAny) { setProfile({...profileDraft}); setProfileSaved(true) }
+                            if (hasAny) {
+                              setProfile({...profileDraft})
+                              setProfileSaved(true)
+                              if (user) saveProfile(user.uid, profileDraft)
+                            }
                             setProfileEditing(false)
                           }} style={{
                             width: '100%', padding: '10px', marginTop: '4px',
@@ -807,7 +1003,7 @@ export default function App() {
               )
             })()}
 
-            {/* History entries — expandable + hover-to-highlight */}
+            {/* History entries */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
               {history.length === 0 ? (
                 <div style={{ textAlign: 'center', marginTop: '60px', color: 'rgba(255,255,255,0.2)', fontSize: '13px', fontWeight: '300' }}>
@@ -864,7 +1060,7 @@ export default function App() {
                 fontWeight: '400', letterSpacing: '1.2px', textTransform: 'uppercase', fontFamily: 'inherit',
               }}>↓ Download Full Medical History</button>
               {history.length > 0 && (
-                <button onClick={() => setHistory([])} style={{
+                <button onClick={() => { setHistory([]); if (user) saveHistory(user.uid, []) }} style={{
                   width: '100%', padding: '10px', background: 'transparent',
                   border: '1px solid rgba(255,255,255,0.06)', borderRadius: '10px',
                   color: 'rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: '11px',
