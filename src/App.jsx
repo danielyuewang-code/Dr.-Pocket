@@ -36,7 +36,7 @@ const JOKES = [
 const labelStyle = { fontSize: '9px', fontWeight: '400', letterSpacing: '1.5px', textTransform: 'uppercase', color: 'rgba(255,255,255,0.25)', marginBottom: '4px', fontFamily: "'DM Sans', sans-serif" }
 const inputStyle = { width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '7px 10px', color: 'rgba(255,255,255,0.7)', fontSize: '12px', fontWeight: '300', fontFamily: "'DM Sans', sans-serif", outline: 'none', boxSizing: 'border-box' }
 
-// ─── Mesh-based region detection ─────────────────────────────────────────────
+// ─── Mesh-based region detection
 // New GLB has all nodes properly named — just ignore the base body skin (Main).
 const BASE_IGNORED = new Set(['', 'Scene', 'Group1', 'Main'])
 
@@ -46,7 +46,7 @@ function getMeshRegionName(obj) {
   return name
 }
 
-// ─── Camera Controller ────────────────────────────────────────────────────────
+// ─── Camera Controller
 function CameraController({ target, zoom, approachDir, orbitRef, landingMode, stopRef, resetKey }) {
   const { camera } = useThree()
   const animating = useRef(false)
@@ -110,7 +110,7 @@ function CameraController({ target, zoom, approachDir, orbitRef, landingMode, st
   return null
 }
 
-// ─── Body Model ───────────────────────────────────────────────────────────────
+// ─── Body Model
 const BASE_COLOR  = new THREE.Color(0.85, 0.82, 0.78)
 const HOVER_COLOR = new THREE.Color(0.80, 0.12, 0.12)
 const HOVER_EMIT  = new THREE.Color(0.40, 0.04, 0.04)
